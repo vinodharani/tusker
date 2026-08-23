@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Tusker — Home Cleaning Log</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo">🐘</span>
+        <div class="brand-text">
+          <h1>Tusker</h1>
+          <p>Home cleaning log</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <nav class="view-tabs" role="tablist" aria-label="Views">
+          <button class="view-tab" data-view="areas" role="tab">Areas</button>
+          <button class="view-tab" data-view="appliances" role="tab">🔌 Appliances</button>
+          <button class="view-tab" data-view="stale" role="tab">🧹 Needs Cleaning</button>
+        </nav>
+        <input type="search" id="search" placeholder="Search areas, items, tasks…" autocomplete="off">
+        <button id="btn-add-area" class="btn btn-primary" title="Add a new area">+ Area</button>
+        <div class="menu">
+          <button id="btn-menu" class="btn btn-icon" title="More options">⋯</button>
+          <div id="menu-dropdown" class="menu-dropdown hidden">
+            <button id="btn-export">Export backup (JSON)</button>
+            <button id="btn-import">Import backup…</button>
+            <button id="btn-reset" class="danger">Reset to sample data</button>
+          </div>
+        </div>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" class="container"></main>
+
+  <footer class="footer">
+    <span id="stats"></span>
+  </footer>
+
+  <!-- Log cleaning modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">Log cleaning</h2>
+      <p id="modal-subtitle" class="modal-subtitle"></p>
+      <form id="log-form">
+        <label>What did you do?
+          <input type="text" id="log-task" list="task-suggestions" placeholder="e.g. Vacuumed" required autocomplete="off">
+        </label>
+        <datalist id="task-suggestions"></datalist>
+        <label>When?
+          <input type="date" id="log-date" required>
+        </label>
+        <label>Note <span class="optional">(optional)</span>
+          <input type="text" id="log-note" placeholder="e.g. guest bathroom" autocomplete="off">
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="log-cancel" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
