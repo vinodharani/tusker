@@ -350,6 +350,7 @@ function saveState() {
   } catch (err) {
     console.error("Tusker: failed to save data:", err);
   }
+  schedulePush(); // keep the cloud copy in step (no-op if not syncing)
 }
 
 /* ---------------- Lookups ---------------- */
@@ -780,6 +781,252 @@ function resetData() {
   toast("Reset to sample data");
 }
 
+/* ---------------- Cross-device sync (Firebase Firestore) ----------------
+   One cloud document per household holds the whole state blob.
+   - Local writes: debounced push to Firestore.
+   - Remote writes: onSnapshot listener adopts newer data and re-renders.
+   - Conflict strategy: last writer wins (writes are rare; acceptable here).
+   Requires firebase-config.js to be filled in (see FIREBASE_SETUP.md). */
+
+const HOUSEHOLD_KEY = "tusker.household.v1";
+const SYNC = { db: null, docRef: null, unsub: null, householdId: null,
+               lastPushedJSON: null, lastPushMs: 0, pushTimer: null,
+               status: "off", statusDetail: "", applyingRemote: false };
+
+function syncAvailable() {
+  return typeof firebase !== "undefined" && firebaseConfigured();
+}
+
+async function SyncInit() {
+  if (!syncAvailable()) { setSyncStatus("off"); return; }
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    SYNC.db = firebase.firestore();
+    await firebase.auth().signInAnonymously();
+  } catch (err) {
+    console.error("Tusker: Firebase init failed:", err);
+    setSyncStatus("error", "Sync unavailable");
+    return;
+  }
+
+  let saved = null;
+  try { saved = localStorage.getItem(HOUSEHOLD_KEY); } catch (err) { /* ignore */ }
+  if (saved) joinHousehold(saved);
+  else setSyncStatus("unpaired");
+}
+
+function makeHouseholdCode() {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789"; // no ambiguous chars
+  let code = "";
+  const rand = new Uint8Array(8);
+  crypto.getRandomValues(rand);
+  for (const b of rand) code += alphabet[b % alphabet.length];
+  return `tusker-${code}`;
+}
+
+function detachListener() {
+  if (SYNC.unsub) { SYNC.unsub(); SYNC.unsub = null; }
+}
+
+function createHouseholdInto(ref) {
+  SYNC.lastPushedJSON = JSON.stringify(state);
+  SYNC.lastPushMs = Date.now();
+  return ref.set({ data: JSON.parse(JSON.stringify(state)), updatedAt: Date.now() });
+}
+
+// Pair this device to a household document and start listening.
+async function joinHousehold(code) {
+  detachListener();
+  SYNC.householdId = code;
+  SYNC.docRef = SYNC.db.collection("households").doc(code);
+  try { localStorage.setItem(HOUSEHOLD_KEY, code); } catch (err) { /* ignore */ }
+  setSyncStatus("connecting");
+
+  SYNC.unsub = SYNC.docRef.onSnapshot((snap) => {
+    if (!snap.exists) { setSyncStatus("missing"); return; }
+    applyRemote(snap.data());
+  }, (err) => {
+    console.error("Tusker: snapshot error:", err);
+    setSyncStatus("error", "Connection lost");
+  });
+
+  const snap = await SYNC.docRef.get();
+  if (!snap.exists) {
+    // Household doc vanished; recreate it from local data.
+    await createHouseholdInto(SYNC.docRef);
+  } else {
+    applyRemote(snap.data());
+  }
+  setSyncStatus("synced");
+}
+
+function applyRemote(docData) {
+  if (!docData || !Array.isArray(docData.data && docData.data.areas)) return;
+  const remoteJSON = JSON.stringify(docData.data);
+  if (remoteJSON === SYNC.lastPushedJSON) return; // echo of our own push
+
+  // If we just made a local change that hasn't been pushed yet, prefer ours.
+  const hasUnpushedLocal = JSON.stringify(state) !== SYNC.lastPushedJSON &&
+                           SYNC.lastPushMs > 0 && Date.now() - SYNC.lastPushMs < 10000;
+  if (hasUnpushedLocal) { schedulePush(0); return; }
+
+  SYNC.applyingRemote = true;
+  state = docData.data;
+  collapsed.clear();
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (err) { /* ignore */ }
+  SYNC.applyingRemote = false;
+  SYNC.lastPushedJSON = remoteJSON;
+  setSyncStatus("synced");
+  render();
+}
+
+// Called from saveState(). Debounced so rapid edits cause one write.
+function schedulePush(delay = 600) {
+  if (!SYNC.docRef || SYNC.applyingRemote) return;
+  clearTimeout(SYNC.pushTimer);
+  SYNC.pushTimer = setTimeout(pushState, delay);
+}
+
+async function pushState() {
+  if (!SYNC.docRef || SYNC.applyingRemote) return;
+  const json = JSON.stringify(state);
+  if (json === SYNC.lastPushedJSON) return; // nothing changed
+  SYNC.lastPushedJSON = json;
+  SYNC.lastPushMs = Date.now();
+  try {
+    await SYNC.docRef.set({ data: JSON.parse(json), updatedAt: Date.now() });
+    setSyncStatus("synced");
+  } catch (err) {
+    console.error("Tusker: push failed:", err);
+    SYNC.lastPushedJSON = null; // allow retry on next edit/snapshot
+    setSyncStatus("error", "Offline — will retry on next change");
+  }
+}
+
+function leaveHousehold() {
+  if (!confirm("Stop syncing on this device? Data stays on this device but will no longer update from other devices.")) return;
+  detachListener();
+  try { localStorage.removeItem(HOUSEHOLD_KEY); } catch (err) { /* ignore */ }
+  SYNC.householdId = null;
+  SYNC.docRef = null;
+  setSyncStatus("unpaired");
+  renderSyncDialogBody();
+}
+
+/* ---------------- Sync dialog UI ---------------- */
+
+function setSyncStatus(status, detail = "") {
+  SYNC.status = status;
+  SYNC.statusDetail = detail;
+}
+
+function syncStatusText() {
+  switch (SYNC.status) {
+    case "synced":     return `✅ Synced — household code: ${SYNC.householdId || "?"}`;
+    case "connecting": return "⏳ Connecting…";
+    case "unpaired":   return "This device is not paired to a household yet.";
+    case "error":      return `⚠️ ${SYNC.statusDetail || "Sync problem"}`;
+    case "missing":    return "⚠️ Household not found — check the code.";
+    default:           return "Cloud sync is not configured (see firebase-config.js). Data stays on this device.";
+  }
+}
+
+function openSyncDialog() {
+  $("#menu-dropdown").classList.add("hidden");
+  renderSyncDialogBody();
+  $("#sync-status").textContent = syncStatusText();
+  $("#sync-overlay").classList.remove("hidden");
+  const input = $("#sync-code-input");
+  if (input && !SYNC.householdId) input.focus();
+}
+
+function closeSyncDialog() {
+  $("#sync-overlay").classList.add("hidden");
+}
+
+function renderSyncDialogBody() {
+  const body = $("#sync-body");
+  const leaveBtn = $("#sync-leave");
+
+  if (!syncAvailable()) {
+    body.innerHTML = `<p class="empty">To enable sync, fill in your free Firebase project config in <code>firebase-config.js</code>. See <code>FIREBASE_SETUP.md</code> for the ~5-minute one-time setup.</p>`;
+    leaveBtn.classList.add("hidden");
+    return;
+  }
+
+  leaveBtn.classList.toggle("hidden", !SYNC.householdId);
+
+  if (SYNC.householdId) {
+    body.innerHTML = `
+      <p>This device is synced with household:</p>
+      <p class="sync-code">${escapeHTML(SYNC.householdId)}</p>
+      <p>On another phone or browser, choose <strong>“Join with a code”</strong> and enter it there. Changes appear on all devices automatically.</p>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="sync-options">
+      <div>
+        <h3>New household</h3>
+        <p>Upload this device's data and get a share code for other devices.</p>
+        <button type="button" id="btn-sync-create" class="btn btn-primary">Create household</button>
+      </div>
+      <hr>
+      <div>
+        <h3>Join with a code</h3>
+        <label>Household code
+          <input type="text" id="sync-code-input" placeholder="tusker-xxxxxxxx" autocomplete="off">
+        </label>
+        <button type="button" id="btn-sync-join" class="btn">Join</button>
+      </div>
+    </div>`;
+
+  $("#btn-sync-create").addEventListener("click", async () => {
+    try {
+      setSyncStatus("connecting");
+      const id = makeHouseholdCode();
+      await createHouseholdInto(SYNC.db.collection("households").doc(id));
+      await joinHousehold(id);
+      toast("Household created — sync is on");
+    } catch (err) {
+      console.error(err);
+      alert(`Could not create household: ${err.message}`);
+      setSyncStatus("error", "Create failed");
+    }
+    renderSyncDialogBody();
+  });
+
+  $("#btn-sync-join").addEventListener("click", async () => {
+    const code = $("#sync-code-input").value.trim().toLowerCase();
+    if (!/^tusker-[a-z0-9]{6,}$/.test(code)) {
+      alert("That doesn't look like a Tusker household code.");
+      return;
+    }
+    try {
+      setSyncStatus("connecting");
+      const snap = await SYNC.db.collection("households").doc(code).get();
+      if (!snap.exists) {
+        setSyncStatus("missing");
+        alert("No household found with that code.");
+        renderSyncDialogBody();
+        return;
+      }
+      const hasLocalData = state.areas.some((a) => a.items.length > 0);
+      if (hasLocalData && !confirm(
+        "Joining will replace this device's data with the household's data.\n" +
+        "(Export a backup first if you want to keep local changes.) Continue?"
+      )) { setSyncStatus("unpaired"); renderSyncDialogBody(); return; }
+      await joinHousehold(code);
+      toast("Joined household — sync is on");
+    } catch (err) {
+      console.error(err);
+      alert(`Could not join: ${err.message}`);
+      setSyncStatus("error", "Join failed");
+    }
+    renderSyncDialogBody();
+  });
+}
+
 /* ---------------- Event wiring ---------------- */
 
 $("#app").addEventListener("click", (e) => {
@@ -876,6 +1123,14 @@ $("#btn-reset").addEventListener("click", () => {
   resetData();
 });
 
+$("#btn-sync").addEventListener("click", openSyncDialog);
+$("#sync-close").addEventListener("click", closeSyncDialog);
+$("#sync-leave").addEventListener("click", leaveHousehold);
+
+$("#sync-overlay").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) closeSyncDialog();
+});
+
 $("#log-form").addEventListener("submit", (e) => {
   e.preventDefault();
   if (!modalCtx) return;
@@ -896,6 +1151,7 @@ $("#modal-overlay").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeLogModal();
+    closeSyncDialog();
     $("#menu-dropdown").classList.add("hidden");
   }
 });
@@ -908,3 +1164,6 @@ if (!state) {
   saveState();
 }
 render();
+
+// Start cloud sync in the background (no-op if Firebase isn't configured).
+SyncInit();

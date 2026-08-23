@@ -463,6 +463,28 @@ body {
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* ---------------- Sync dialog ---------------- */
+
+.sync-options h3 { margin: 8px 0 4px; font-size: 1rem; }
+.sync-options p { margin: 4px 0 10px; color: var(--muted); font-size: 0.88rem; }
+.sync-options hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.sync-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.5px;
+  background: var(--surface-2);
+  padding: 8px 12px;
+  border-radius: 8px;
+  display: inline-block;
+}
+#sync-body label input {
+  width: 100%;
+  margin-top: 6px;
+  box-sizing: border-box;
+}
+#sync-body .btn-primary,
+#sync-body .btn { margin-top: 6px; }
+
 /* ---------------- Responsive ---------------- */
 
 @media (max-width: 640px) {

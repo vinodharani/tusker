@@ -30,6 +30,7 @@
         <div class="menu">
           <button id="btn-menu" class="btn btn-icon" title="More options">⋯</button>
           <div id="menu-dropdown" class="menu-dropdown hidden">
+            <button id="btn-sync">☁️ Sync across devices…</button>
             <button id="btn-export">Export backup (JSON)</button>
             <button id="btn-import">Import backup…</button>
             <button id="btn-reset" class="danger">Reset to sample data</button>
@@ -72,6 +73,25 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <!-- Sync dialog -->
+  <div id="sync-overlay" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+      <h2 id="sync-title">Sync across devices</h2>
+      <p id="sync-status" class="modal-subtitle">Checking…</p>
+      <div id="sync-body"></div>
+      <div class="modal-actions">
+        <button type="button" id="sync-close" class="btn">Close</button>
+        <button type="button" id="sync-leave" class="btn danger hidden">Stop syncing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase (compat builds — no build step needed). Loaded before app.js.
+       If the config is not filled in, these are simply unused. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
