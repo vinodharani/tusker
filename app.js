@@ -694,7 +694,7 @@ function deleteEvent(areaId, itemId, eventId) {
 
 let modalCtx = null; // { areaId, itemId }
 
-function openLogModal(areaId, itemId, presetTask = "") {
+function openLogModal(areaId, itemId, presetTask = "", focusDate = false) {
   const area = findArea(areaId);
   const item = findItem(areaId, itemId);
   if (!area || !item) return;
@@ -705,7 +705,8 @@ function openLogModal(areaId, itemId, presetTask = "") {
   $("#log-note").value = "";
   fillSuggestions(item);
   $("#modal-overlay").classList.remove("hidden");
-  $("#log-task").focus();
+  // Task is already filled for quick actions, so point the user at the date.
+  (focusDate ? $("#log-date") : $("#log-task")).focus();
 }
 
 function closeLogModal() {
@@ -1065,7 +1066,7 @@ $("#app").addEventListener("click", (e) => {
     case "delete-item": deleteItem(areaId, itemId); break;
     case "log": openLogModal(areaId, itemId); break;
     case "quick-log":
-      logCleaning(areaId, itemId, actionEl.dataset.task, todayISO(), "");
+      openLogModal(areaId, itemId, actionEl.dataset.task, true);
       break;
     case "delete-event":
       deleteEvent(areaId, itemId, actionEl.dataset.eventId);
