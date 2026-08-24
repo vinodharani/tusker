@@ -1080,6 +1080,12 @@ $("#btn-add-area").addEventListener("click", addArea);
 // Keep the "+ Area"/"+ Category" button label in sync with the active view.
 function updateAddButton() {
   const btn = $("#btn-add-area");
+  // The "Needs Cleaning" view is a read-only summary; hide the add button there.
+  if (currentView === "stale") {
+    btn.classList.add("hidden");
+    return;
+  }
+  btn.classList.remove("hidden");
   if (currentView === "appliances") {
     btn.textContent = "+ Appliance";
     btn.title = "Add a new appliance category";
